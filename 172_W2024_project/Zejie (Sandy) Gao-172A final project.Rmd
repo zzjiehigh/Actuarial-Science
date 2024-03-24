@@ -1,0 +1,452 @@
+---
+title: ' '
+author: ' '
+date: ' '
+output:
+  pdf_document: 
+    fig_caption: yes
+    keep_tex: yes
+header-includes: \usepackage{float}
+geometry: left=3cm,right=3cm,top=2cm,bottom=2cm
+editor_options: 
+  markdown: 
+    wrap: sentence
+---
+
+```{=tex}
+\begin{titlepage}
+\centering
+\vspace*{5cm}
+{\Large\bfseries PSTAT 172A Project:\\[0.5em]
+Pricing Insurance and Setting a Security Loading\par}
+\vspace{2cm}
+{\large Author: Zejie (Sandy) Gao\par}
+{\large University of California, Santa Barbara\par}
+{\large PSTAT 172A: Actuarial Statistics I\par}
+{\large Instructor: Dr. Hal Pedersen\par}
+{\large Winter 2024\par}
+\vspace*{\fill}
+\end{titlepage}
+```
+\newpage
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,fig.pos = "H")
+```
+
+```{r, message=FALSE, warning=FALSE,results='hide', echo=FALSE}
+# Load necessary libraries
+rm(list=ls())
+library(tidyverse)
+library(lubridate)
+library(MASS)
+library(astsa)
+library(tsdl)
+library(xts)
+library(tibble)
+library(ggplot2)
+library(readxl)
+library(dplyr)
+```
+
+*Background*
+
+You are the pricing actuary for your insurance company.
+You are asked to analyze a whole life insurance policy on (60) for which the benefit of \$1,000 is paid at the end of the year of death.
+Assume that the effective annual interest rate is 6% (i.e., i=0.06).
+
+```{r, message=FALSE, warning=FALSE,results='hide', echo=FALSE}
+# Correct file path (ensure this matches the actual path on your system)
+file_path <- "/Users/zejiegao/Desktop/pstat172a/172_W2024_project/Copy of Project Mortality Data.xlsx" 
+
+# Use read_excel to read the file
+mortality_data <- read_excel(file_path)
+```
+
+# 1. Compute the net single premium for the policy.
+
+Under the equivalence principle, the premium is set such that the expected value of the loss for the random variable at issue is zero.
+The equation for the net single premium will be as follows:
+
+```{=tex}
+\begin{center}
+  \textbf{EPV of premium income = EPV of benefit outgo}
+\end{center}
+```
+Here is the head of the modified data set:
+
+```{r, message=FALSE, warning=FALSE,results='hide', echo=FALSE}
+# Filter the data to only include ages after 60
+i <- 0.06
+v <- (1+i)^(-1)
+mortality_data_above_60 <- mortality_data %>% 
+  filter(x >= 60) %>%
+  mutate(k = 0:59) %>%
+  mutate(discount_factor = v^(k+1)) %>%
+  mutate(px = 1 - qx) %>%
+  mutate(kpx = accumulate(px, ~ .x * .y, .init = 1)[-1]) %>%
+  mutate(kpx = lag(kpx, default = 1)) %>%
+  mutate(sqr_discount_factor = v^(2*(k+1)))
+```
+
+```{r, message=FALSE, warning=FALSE,echo=FALSE}
+head(mortality_data_above_60)
+```
+
+The next step is to sum over all possible payment times, taking the product of the benefit amount, the corresponding discount factors, and the probability that the benefit will be paid at that time.
+Alternatively, this can be expressed as the benefit amount multiplied by $A_{60}$.
+
+```{r, message=FALSE, warning=FALSE,echo=FALSE}
+# Calculate the sum of the product of `qx`, `kpx`, and `discount` for the entire dataframe
+A_60 <- sum(mortality_data_above_60$qx * mortality_data_above_60$kpx * mortality_data_above_60$discount_factor)
+
+# set benefit
+B <- 1000 
+Epv_B <- B *A_60
+
+# Create a named vector to display as a list
+cat("Whole life insurance at Age 60: $", A_60, "\n")
+cat("Benefit Amount: $", B, "\n")
+cat("Expected Present Value of Benefit Outgo: $", Epv_B, "\n")
+```
+
+Thus, the net single premium for the policy is \$345.56, equivalent to the expected present value of benefit outgo according to the equivalence principle.
+
+# 2. Compute the net annual premium for the policy.
+
+Under the equivalence principle, we can drive the annual premium as the equation:
+
+$$
+B * A_{60} = P_{60}*\ddot{a}_{{60}}
+$$
+
+```{r, message=FALSE, warning=FALSE,echo=FALSE}
+a_60_due <- sum(v^(-1)*mortality_data_above_60$kpx * mortality_data_above_60$discount_factor)
+P_60 <- Epv_B /a_60_due
+# Create a named vector to display as a list
+cat("Whole life annuity-due at Age 60: $", a_60_due, "\n")
+cat("Net annual premium:$", P_60, "\n")
+```
+
+Thus, the net annual premium for the policy is \$29.89.
+
+# 3. Determine the single premium for the policy for a group of 2,500 identical insureds so that the probability of a loss is less than or equal to 0.025.
+
+Let's denote $P^{\epsilon}$ as the single premium for the policy.
+Then, the loss for individual policy will be
+
+$L^{(i)} = 1000*v^{k^{(i)}_x+1}-P^{\epsilon}$.\
+By using CLT, we can approximate the sum of the 2,500 identical insured's Loss $L$ minus mean $\mu = N*E[L^{(i)}]$ divided by $\sigma = (N* Var[L^{(i)}])^{0.5}$ follows a standard normal distribution.
+
+-   $E[L^{(i)}]$ is the EPV of Benefit outgo minus $P^{\epsilon}$ , which is $1000*A_{60} - P^{\epsilon}$
+
+-   $Var[L^{(i)}])$ = $1000^2*\sigma^2_{A_{60}}$
+
+-   $N = 2500$
+
+So $P(L > 0 ) = 0.025$ is equivalent to $P(Z > \frac{0-\mu}{\sigma}) = 0.025$, that is to say find out the $P^{\epsilon}$ to satisfy: $$
+\Phi(\frac{-\mu}{\sigma}) = 0.975
+$$
+
+$$
+\frac{-N*(A_{60}-P^{\epsilon})}{(N* 1000^2*\sigma^2_{A_{60}})^{0.5}} = \zeta_{0.975}
+$$
+
+$$
+\frac{(N)^{0.5}*(P^{\epsilon}-A_{60})}{1000*\sigma_{A_{60}}} = \zeta_{0.975}
+$$
+
+$$
+P^{\epsilon} = \frac{1000}{(N)^{0.5}}*\zeta_{0.975}*\sigma_{A_{60}} + 1000*A_{60}
+$$
+
+```{r, message=FALSE, warning=FALSE,echo=FALSE}
+sqr_A_60 <- sum(mortality_data_above_60$qx * mortality_data_above_60$kpx * mortality_data_above_60$sqr_discount_factor)
+sigma_A_60 <- (sqr_A_60 - A_60^2)^0.5
+zeta_0_975 <- qnorm(0.975)
+```
+
+-   $\sigma_{A_{60}} = 0.2042844$
+
+-   $\zeta_{0.975} = 1.959964$
+
+-   $A_{60} = 0.3455611$
+
+```{r, message=FALSE, warning=FALSE,echo=FALSE}
+# Define the function to calculate the single premium
+calculate_single_premium <- function(N, zeta, sigma, A) {
+  premium <- (1000 / sqrt(N)) * zeta * sigma + 1000 * A
+  return(premium)
+}
+
+# Calculate the single premium for N = 2500
+N <- 2500
+p <- calculate_single_premium(N, zeta_0_975, sigma_A_60, A_60)
+
+# Print the single premium
+cat("Single premium for this policy under problem 3's condition is $", p, "\n")
+```
+
+Thus, the single premium for the policy for a group of $2,500$ identical insureds so that the probability of a loss is less than or equal to 0.025 is \$353.57.
+
+# 4. Determine the annual premium for the policy for a group of 2,500 identical insureds so that the probability of a loss is less than or equal to 0.025.
+
+Let's denote $P^{\epsilon}$ as the annual premium for the policy.
+Then, the loss for individual policy will be
+
+$$
+L^{(i)} = 1000*v^{k^{(i)}_x+1}-P^{\epsilon}_x*\ddot{a}_{k^{(i)}_x+1}.
+$$
+
+By using CLT, we can approximate the sum of the 2,500 identical insured's Loss $L$ minus mean $\mu = N*E[L^{(i)}]$ divided by $\sigma = (N* Var[L^{(i)}])^{0.5}$ follows a standard normal distribution.
+
+-   $E[L^{(i)}]$ is the EPV of Benefit outgo minus EPV of income, which is $1000*A_{60} - P^{\epsilon}_{60}*\ddot{a}_{60}$.
+
+-   $A_{60} = P_{60}*\ddot{a}_{60}$, where $P_{60}$ is the net annual premium.
+
+-   $Var[L^{(i)}])$ = $\left(1000+\frac{P_x^{\varepsilon}}{d}\right)^2 \sigma^2_{A_{60}}$
+
+-   $N = 2500$
+
+So, $P(L > 0 ) = 0.025$ is equivalent to $P(Z > \frac{0-\mu}{\sigma}) = 0.025$, that is to say find out the $P^{\epsilon}$ to satisfy:
+
+$$
+\Phi(\frac{-\mu}{\sigma}) = 0.975
+$$
+
+$$
+\frac{N*(P^{\epsilon}_{60}-P_{60})*\ddot{a}_{60}}{N^{0.5}* \left(1000+\frac{P_{60}^{\varepsilon}}{d}\right) \sigma_{A_{60}}} = \zeta_{0.975}
+$$
+
+$$
+\frac{N^{0.5}*(P^{\epsilon}_{60}-P_{60})*\ddot{a}_{60}}{ \left(1000+\frac{P_{60}^{\varepsilon}}{d}\right) \sigma_{A_{60}}} = \zeta_{0.975}
+$$
+
+$$
+(P^{\varepsilon}_{60} - P_{60})\ddot{a}_{60} = \frac{\zeta_{0.975} \sigma_{A_{60}}}{\sqrt{N}} 1000 + \frac{\zeta_{0.975} \sigma_{A_{60}}}{\sqrt{N}} \cdot \frac{P^{\varepsilon}_{60}}{d}
+$$
+
+$$
+P^{\varepsilon}_{60}\ddot{a}_{60} - \frac{\zeta_{0.975} \sigma_{A_{60}}}{d\sqrt{N}} P^{\varepsilon}_{60} = P_{60}\ddot{a}_{60} + \frac{\zeta_{0.975} \sigma_{A_{60}} 1000}{\sqrt{N}}
+$$
+
+$$
+P^{\varepsilon}_{60} \left(\ddot{a}_{60} - \frac{\zeta_{0.975} \sigma_{A_{60}}}{d\sqrt{N}}\right) = P_{60}\ddot{a}_{60} + \frac{\zeta_{0.975} \sigma_{A_{60}} 1000}{\sqrt{N}}
+$$
+
+$$
+P^{\varepsilon}_{60} = \frac{P_{60}\ddot{a}_{60} + \frac{\zeta_{0.975} \sigma_{A_{60}} 1000}{\sqrt{N}}}{\ddot{a}_{60} - \frac{\zeta_{0.975} \sigma_{A_{60}}}{d\sqrt{N}}}
+$$
+
+$$
+P^{\epsilon}_{60} = \frac{P_{60} + 1000*\frac{\zeta_{0.975}*\sigma_{A_{60}}}{(N)^{0.5}*\ddot{a}_{{20}}}}{1-\frac{\zeta_{0.975}*\sigma_{A_{60}}}{(N)^{0.5}*\ddot{a}_{{20}}*d}}
+$$
+
+-   $N = 2500$
+
+-   $d = \frac{i}{1+i}$
+
+-   $P_{60}$ is calculated form problem 2 which is \$29.88.
+
+```{r, message=FALSE, warning=FALSE,echo=FALSE}
+# Define the function to calculate the single premium
+calculate_annual_premium <- function(i, Px, sigma, zeta, a_due, N) {
+  d <- i / (1 + i)
+  numerator <- Px + 1000*((zeta * sigma) / (sqrt(N) * a_due))
+  denominator <- 1 - (zeta * sigma) / (sqrt(N) * a_due * d)
+  premium <- numerator / denominator
+  return(premium)
+}
+
+# Calculate the annual premium for N = 2500
+N <- 2500
+
+# Calculate the single premium
+p_q4 <- calculate_annual_premium(i, P_60,sigma_A_60, zeta_0_975, a_60_due, N)
+
+# Print the single premium
+cat("Annual premium for this policy under problem 4's condition is $", p_q4, "\n")
+```
+
+Thus, the annual premium for the policy for a group of $2,500$ identical insureds so that the probability of a loss is less than or equal to 0.025 is \$30.96.
+
+# 5. What happens to the single and annual premiums as the number of identical insureds increases under the premium calculations in 3 and 4?
+
+From the equation in 3:
+
+$$
+P^{\epsilon}_x= \frac{1000}{(N)^{0.5}}*\zeta_{0.975}*\sigma_{A_{60}} + 1000*A_{60}
+$$
+
+From this equation, as $N \to \infty$, the first term involving $\zeta_{0.975}$and $\sigma_{A_{60}}$ will approaches zero.
+Therefore, as N grows very large, the single premium $P^{\epsilon}_x$ for this policy under these conditions approaches $1000*A_{60}$, or \$345.56.
+
+From the equation in 4:
+
+$$
+P^{\epsilon}_{60} = \frac{P_{60} + 1000*\frac{\zeta_{0.975}*\sigma_{A_{60}}}{(N)^{0.5}*\ddot{a}_{{20}}}}{1-\frac{\zeta_{0.975}*\sigma_{A_{60}}}{(N)^{0.5}*\ddot{a}_{{20}}*d}}
+$$
+
+From this equation, as $N \to \infty$, annual premium P for this policy under these conditions approaches $P_{60}$, or \$29.88.
+
+# 6. Produce a chart of the single and annual premiums as a function of the number of insureds under the requirements of items 3 and 4 respectively.
+
+```{r, message=FALSE, warning=FALSE,echo=FALSE}
+N_values <- seq(100, 1000000, by = 1000)
+
+# Calculate single premiums for the given range of insureds
+premiums <- sapply(N_values, calculate_single_premium, zeta = zeta_0_975, sigma = sigma_A_60, A = A_60)
+
+# Create a data frame for plotting
+premiums_data <- data.frame(
+  Number_of_Insureds = N_values,
+  Single_Premium = premiums
+)
+
+# Plot the premiums
+ggplot(premiums_data, aes(x = Number_of_Insureds, y = Single_Premium)) +
+  geom_line() +
+  geom_hline(yintercept = 1000 * A_60, linetype = "dotted", color = "red") +
+  annotate("text", x = Inf, y = 1000 * A_60, label = paste("1000 * A_60 =", 1000 * A_60), hjust = 1, vjust = -2, color = "red", size = 3.5) +
+  labs(
+    title = "Single Premium as a Function of the Number of Insureds",
+    x = "Number of Insureds",
+    y = "Single Premium ($)"
+  ) +
+  theme_minimal() 
+```
+
+```{r, message=FALSE, warning=FALSE,echo=FALSE}
+# Create a range of different numbers of insureds
+N_values <- seq(100, 1000000, by = 1000)
+
+# Calculate annual premiums for the given range of insureds
+annual_premiums <- sapply(N_values, calculate_annual_premium, i = i, Px = P_60, sigma = sigma_A_60, zeta = zeta_0_975, a_due = a_60_due)
+
+# Create a data frame for plotting
+premiums_data <- data.frame(
+  Number_of_Insureds = N_values,
+  Annual_Premium = annual_premiums
+)
+
+# Plot the annual premiums
+ggplot(premiums_data, aes(x = Number_of_Insureds, y = Annual_Premium)) +
+  geom_line() +
+  geom_hline(yintercept = P_60, linetype = "dotted", color = "red") +
+  annotate("text", x = Inf, y = P_60, label = paste("P_60 =", P_60), hjust = 1, vjust = -2, color = "red", size = 3.5) +
+  labs(
+    title = "Annual Premium as a Function of the Number of Insureds",
+    x = "Number of Insureds",
+    y = "Annual Premium ($)"
+  ) +
+  theme_minimal()
+```
+
+# 7. Now assume that 10 years have passed and there are 2,050 lives remaining from the original pool of insureds. How much reserve should the insurer have per policy in order to have a 98% probability of not losing money? Do this calculation for the annual premium case.
+
+After 10 years each policy now has loss:
+
+$$
+L_{x, n}^{(i)}=1000*v^{k^{(i)}_{x+n}+1}-P_x^{\varepsilon} \ddot{a} _{k^{(i)}_{x+n}+1}.
+$$
+
+The Expected value of loss and the variance of loss per policy will be:
+
+$$
+\begin{aligned}
+& \mathbb{E}\left[L_{x, n}^{(1)}\right]=1000*A_{x+n}-P_x^{\varepsilon} \ddot{a}_{x+n}, \\
+& \operatorname{Var}\left[L_{x, n}^{(i)}\right]=\left(1000+\frac{P_x^{\varepsilon}}{d}\right)^2\left({}^2A_{x+n}-A_{x+n}^2\right).
+\end{aligned}
+$$ The sum of loss for alive policyholder $L_{x,n}$ and the reserve per policy after n years $R_n$ will have equations below:
+
+$$
+\begin{aligned}
+& L_{x, n}=L_{x, n}^{(1)}+\cdots+L_{x, n}^{(m)} \text{, where } m=2,050. \\
+& 0.02=P\left(L_{x, n}>R_n \cdot m\right). \\
+& 0.02=P\left(\frac{L_{x, n}-\mathbb{E}\left[L_{x, n}\right]}{\sqrt{\operatorname{Var}\left(L_{x, n}\right)}}>\frac{R_n \cdot m-m\left[1000*A_{x+n}-P_x^{\varepsilon} \ddot{a}_{x+n}\right]}{\sqrt{m}\left(1000+\frac{P_{x}^{\varepsilon}}{d}\right) \sigma_{A_{x+n}}}\right). \\
+& 0.02=1-\Phi\left(\frac{\sqrt{m}\left(R_n-\left[1000*A_{x+n}-P_x^{\varepsilon} \ddot{a}_{x+n}\right]\right)}{\left(1000+\frac{P_x^{\varepsilon}}{d}\right) \sigma_{A_{x+n}}}\right). \\
+& \zeta_{0.98} =\left(\frac{\sqrt{m}\left(R_n-\left[1000*A_{x+n}-P_x^{\varepsilon} \ddot{a}_{x+n}\right]\right)}{\left(1000+\frac{P_x^{\varepsilon}}{d}\right) \sigma_{A_{x+n}}}\right). \\
+& R_n=\left(\zeta_{0.98}\left(1000+\frac{P_x^{\varepsilon}}{d}\right) \sigma_{A_{x+n}}\right) \frac{1}{\sqrt{m}}+\left[1000*A_{x+n}-P_x^{\varepsilon} \ddot{a}_{x+n}\right], \quad\{x=60, n=10\}.
+\end{aligned} 
+$$
+
+$$
+R_{10}=\left(\zeta_{0.98}\left(1000+\frac{P_{60}^{\varepsilon}}{d}\right) \sigma_{A_{70}}\right) \frac{1}{\sqrt{2050}}+\left[1000*A_{70}-P_{60}^{\varepsilon} \ddot{a}_{70}\right].
+$$
+
+Given:
+
+-   The annual premium $P_{60}^{\varepsilon}$ for a group of 2,500 identical insured individuals aged 60 was calculated to ensure a loss probability of no more than 2.5%, resulting in a premium of \$30.95974.
+
+-   The same calculation method was applied to a dataset concerning mortality rates for individuals aged over 70, allowing for the estimation of actuarial values for this age group.
+
+```{r, message=FALSE, warning=FALSE,echo=FALSE}
+
+# Filter the dataset to include only individuals aged 70 and above
+mortality_data_above_70 <- mortality_data_above_60 %>% 
+  filter(x >= 70)  %>%
+  mutate(k = 0:49) %>%
+  mutate(discount_factor = v^(k+1)) %>%
+  mutate(px = 1 - qx) %>%
+  mutate(kpx = accumulate(px, ~ .x * .y, .init = 1)[-1]) %>%
+  mutate(kpx = lag(kpx, default = 1)) %>%
+  mutate(sqr_discount_factor = v^(2*(k+1)))
+
+# Calculate A_70: Expected present value of benefits
+A_70 <- sum(mortality_data_above_70$qx * mortality_data_above_70$kpx * mortality_data_above_70$discount_factor)
+
+# Calculate a_70_due: Present value of future payments
+a_70_due <- sum(v^(-1)*mortality_data_above_70$kpx * mortality_data_above_70$discount_factor)
+
+# Calculate sqr_A_70: Used for variance calculation
+sqr_A_70 <- sum(mortality_data_above_70$qx * mortality_data_above_70$kpx * mortality_data_above_70$sqr_discount_factor)
+
+# Calculate sigma_A_70: Standard deviation of A_70
+sigma_A_70 <- (sqr_A_70 - A_70^2)^0.5
+
+# Calculate zeta_0_98: 98th percentile of a standard normal distribution
+zeta_0_98 <- qnorm(0.98)
+
+# Define discount factor 'd' based on interest rate 'i'
+d <- i / (1 + i)
+
+# Define the number of trials or observations 'm'
+m <- 2050
+
+results_list <- list(
+  A_70 = A_70,
+  a_70_due = a_70_due,
+  sigma_A_70 = sigma_A_70,
+  zeta_0_98 = zeta_0_98,
+  d = d
+)
+
+# Display the results
+print(results_list)
+```
+
+```{r, message=FALSE, warning=FALSE,echo=FALSE}
+# Calculate R_10 using the derived formula
+R_10 <- (zeta_0_98 * (1000 + p_q4 / d) * sigma_A_70) / sqrt(m)+ (1000 * A_70 - p_q4 * a_70_due)
+
+# Output the result for R_10
+cat("Reserve Per Policy After 10 Years is: $", R_10)
+```
+
+Therefore, in order to have a 98% probability of not losing money, insuer should have reserve value \$ 210.00 per policy.
+
+# 8. Discuss the benefit and drawbacks of charging a portfolio level premium versus a net premium based on the equivalence principle.			
+
+The Equivalence Principle and the Portfolio Percentage Premium Principle (PPPP) provide distinct methods for calculating premiums for a policy.
+Unlike the Equivalence Principle which determines premiums based on an individual's expected loss, PPPP determines premiums based on the expected loss of a large portfolio of identical and independent policies.
+
+Compared with the Equivalence Principle, there are several benefits for PPPP.
+PPPP sets a level of premiums for all policyholders in the portfolio, enhancing underwriting efficiency by saving time to determine premiums separately.
+Also, it diverse the risk for the policyholders.
+The third one is that it aids in stabilizing the financial outcomes for insurance companies.
+
+Moreover, PPPP is designed to achieve specific probabilistic objectives, ensuring the probability of not losing money.
+While it controls the probability of incurring a loss, it does not necessarily address the size issue of the loss.
+This could pose a major problem if the loss is significant enough to bankrupt the insurance company.
+
+Therefore, although PPPP offers an efficient way to handle a large number of policies, it requires careful management to mitigate the risk of unexpected large losses.
